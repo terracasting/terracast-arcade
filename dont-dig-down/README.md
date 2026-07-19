@@ -49,3 +49,13 @@ Open `project.godot` with Godot 4.3 or newer and press **F6/F5** to play.
 - Procedural placeholder worm, platforms, coins, soil layers, roots, lighting, and HUD
 
 The rescue is restored when a new checkpoint is reached or after respawning at an unlocked checkpoint. This iteration is intended to tune movement and scale before final character animation and production artwork are installed.
+
+## v1.6 changes
+
+- Moving platforms now come in three motion types — horizontal (teal), vertical (purple), and circular (amber) — and appear earlier, more often, and longer into each stage
+- Obstacles expanded from 5 to 8 silhouettes (added a thin spike, a wide low barrier, and a boulder cluster) and every obstacle now spawns at a randomized size, so routes no longer repeat identical shapes
+- From Level 3 onward, some rows spawn a second obstacle on the opposite side of the platform for denser routes
+- Added a MUSIC mute toggle: click/tap the on-screen button in the top-right, or press **M**
+- Rebuilt the mobile controls as a floating joystick: touch anywhere on the left ~60% of the screen and that becomes the joystick center — no more hunting for a small fixed button. Tap the right side to jump; BOOST has its own button, bottom-right
+- Fixed handheld orientation being set to "sensor" (which could rotate this landscape-only game into portrait and push the touch controls off the usable area) — it's now locked to landscape
+- Enabled mouse-as-touch emulation in the project settings, so the mobile controls can be tested with a mouse directly in the Godot editor

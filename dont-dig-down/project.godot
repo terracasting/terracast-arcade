@@ -9,7 +9,10 @@ window/size/window_width_override=1280
 window/size/window_height_override=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
-window/handheld/orientation="sensor"
+window/handheld/orientation="landscape"
+
+[input_devices]
+pointing/emulate_touch_from_mouse=true
 
 [rendering]
 renderer/rendering_method="gl_compatibility"

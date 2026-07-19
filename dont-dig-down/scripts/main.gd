@@ -36,6 +36,9 @@ var coins := 0
 const BOOST_COST := 20
 var checkpoint_markers: Array[Area2D] = []
 var rng := RandomNumberGenerator.new()
+var music_player: AudioStreamPlayer
+var muted := false
+var mute_button: Button
 
 class Worm extends CharacterBody2D:
 	var gravity := 1750.0
@@ -136,15 +139,27 @@ class Worm extends CharacterBody2D:
 		draw_colored_polygon(pts, color)
 
 class MovingPlatform extends AnimatableBody2D:
+	const HORIZONTAL := 0
+	const VERTICAL := 1
+	const CIRCULAR := 2
 	var base_position := Vector2.ZERO
 	var move_amplitude := 90.0
+	var move_amplitude_y := 90.0
 	var move_speed := 1.2
 	var move_phase := 0.0
 	var elapsed := 0.0
+	var motion_type := HORIZONTAL
 
 	func _physics_process(delta: float) -> void:
 		elapsed += delta
-		position = base_position + Vector2(sin(elapsed * move_speed + move_phase) * move_amplitude, 0)
+		var t: float = elapsed * move_speed + move_phase
+		match motion_type:
+			VERTICAL:
+				position = base_position + Vector2(0, sin(t) * move_amplitude_y)
+			CIRCULAR:
+				position = base_position + Vector2(cos(t) * move_amplitude, sin(t) * move_amplitude_y)
+			_:
+				position = base_position + Vector2(sin(t) * move_amplitude, 0)
 
 class CoinVisual extends Node2D:
 	func _draw() -> void:
@@ -161,57 +176,79 @@ class CoinVisual extends Node2D:
 		draw_arc(Vector2(-5, -5), 21, 3.5, 5.1, 18, Color(1, 1, 0.82, 0.85), 4.0)
 
 class MobileControls extends Node2D:
+	# A floating joystick instead of fixed L/R buttons: wherever the player's
+	# thumb first lands in the movement zone becomes the joystick center, so
+	# there's no small fixed hitbox to miss on any screen size or hand position.
+	const LEFT_ZONE_FRACTION := 0.58
+	const JOYSTICK_RADIUS := 95.0
+	const DEAD_ZONE := 16.0
 	var active := false:
 		set(value):
 			active = value
+			if not value:
+				_release_all()
 			queue_redraw()
-	var pad_origin := Vector2.ZERO
-	var boost_rect := Rect2()
-	var touch_roles := {}
-	var drag_offsets := {}
 	var screen_size := Vector2.ZERO
+	var boost_rect := Rect2()
+	var joy_index := -1
+	var joy_origin := Vector2.ZERO
+	var joy_current := Vector2.ZERO
+	var jump_index := -1
+	var boost_index := -1
 
 	func _ready() -> void:
 		z_index = 200
 		set_process_input(true)
-		_layout(true)
-		get_viewport().size_changed.connect(func() -> void: _layout(true))
+		_layout()
+		get_viewport().size_changed.connect(_layout)
 
-	func _layout(reset_pad: bool) -> void:
+	func _layout() -> void:
 		screen_size = get_viewport().get_visible_rect().size
-		if reset_pad or pad_origin == Vector2.ZERO:
-			pad_origin = Vector2(26, screen_size.y - 132)
-		boost_rect = Rect2(Vector2(screen_size.x - 172, screen_size.y - 132), Vector2(146, 106))
+		boost_rect = Rect2(Vector2(screen_size.x - 190, screen_size.y - 210), Vector2(160, 160))
 		queue_redraw()
 
-	func _left_rect() -> Rect2:
-		return Rect2(pad_origin, Vector2(118, 106))
+	func _movement_zone() -> Rect2:
+		return Rect2(Vector2.ZERO, Vector2(screen_size.x * LEFT_ZONE_FRACTION, screen_size.y))
 
-	func _right_rect() -> Rect2:
-		return Rect2(pad_origin + Vector2(130, 0), Vector2(118, 106))
-
-	func _grip_rect() -> Rect2:
-		return Rect2(pad_origin + Vector2(55, -52), Vector2(138, 44))
+	func _release_all() -> void:
+		if joy_index != -1:
+			Input.action_release("move_left")
+			Input.action_release("move_right")
+			joy_index = -1
+		if jump_index != -1:
+			Input.action_release("jump")
+			jump_index = -1
+		if boost_index != -1:
+			Input.action_release("rescue")
+			boost_index = -1
 
 	func _draw() -> void:
 		if not active:
 			return
 		var font := ThemeDB.fallback_font
-		var left := _left_rect()
-		var right := _right_rect()
-		var grip := _grip_rect()
-		draw_rect(left, Color(0.05, 0.16, 0.08, 0.78), true)
-		draw_rect(right, Color(0.05, 0.16, 0.08, 0.78), true)
-		draw_rect(left, Color(0.72, 1.0, 0.45, 0.9), false, 4.0)
-		draw_rect(right, Color(0.72, 1.0, 0.45, 0.9), false, 4.0)
-		draw_rect(grip, Color(0.16, 0.22, 0.12, 0.88), true)
 		draw_rect(boost_rect, Color(0.24, 0.58, 0.10, 0.82), true)
 		draw_rect(boost_rect, Color(0.82, 1.0, 0.58, 0.95), false, 4.0)
-		draw_string(font, left.position + Vector2(43, 70), "L", HORIZONTAL_ALIGNMENT_LEFT, -1, 38, Color.WHITE)
-		draw_string(font, right.position + Vector2(43, 70), "R", HORIZONTAL_ALIGNMENT_LEFT, -1, 38, Color.WHITE)
-		draw_string(font, grip.position + Vector2(19, 31), "MOVE", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
-		draw_string(font, boost_rect.position + Vector2(15, 66), "BOOST", HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color.WHITE)
-		draw_string(font, Vector2(screen_size.x * 0.5 - 125, screen_size.y - 34), "TAP ANYWHERE TO JUMP", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 1, 1, 0.72))
+		draw_string(font, boost_rect.position + Vector2(16, 90), "BOOST", HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
+		if joy_index != -1:
+			draw_circle(joy_origin, JOYSTICK_RADIUS, Color(0.08, 0.2, 0.1, 0.5))
+			draw_arc(joy_origin, JOYSTICK_RADIUS, 0, TAU, 40, Color(0.72, 1.0, 0.45, 0.85), 4.0)
+			var offset: Vector2 = (joy_current - joy_origin).limit_length(JOYSTICK_RADIUS * 0.6)
+			draw_circle(joy_origin + offset, 42.0, Color(0.72, 1.0, 0.45, 0.92))
+		else:
+			draw_string(font, Vector2(24, screen_size.y - 40), "DRAG HERE TO MOVE", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1, 1, 1, 0.65))
+		draw_string(font, Vector2(screen_size.x * LEFT_ZONE_FRACTION + 24, screen_size.y - 40), "TAP TO JUMP", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1, 1, 1, 0.65))
+
+	func _update_move_axis() -> void:
+		var dx: float = joy_current.x - joy_origin.x
+		if dx < -DEAD_ZONE:
+			Input.action_press("move_left")
+			Input.action_release("move_right")
+		elif dx > DEAD_ZONE:
+			Input.action_press("move_right")
+			Input.action_release("move_left")
+		else:
+			Input.action_release("move_left")
+			Input.action_release("move_right")
 
 	func _input(event: InputEvent) -> void:
 		if not active:
@@ -219,35 +256,34 @@ class MobileControls extends Node2D:
 		if event is InputEventScreenTouch:
 			var touch := event as InputEventScreenTouch
 			if touch.pressed:
-				if _grip_rect().has_point(touch.position):
-					touch_roles[touch.index] = "drag"
-					drag_offsets[touch.index] = touch.position - pad_origin
-				elif _left_rect().has_point(touch.position):
-					touch_roles[touch.index] = "left"
-					Input.action_press("move_left")
-				elif _right_rect().has_point(touch.position):
-					touch_roles[touch.index] = "right"
-					Input.action_press("move_right")
-				elif boost_rect.has_point(touch.position):
-					touch_roles[touch.index] = "boost"
+				if boost_rect.has_point(touch.position):
+					boost_index = touch.index
 					Input.action_press("rescue")
-				else:
-					touch_roles[touch.index] = "jump"
+				elif _movement_zone().has_point(touch.position) and joy_index == -1:
+					joy_index = touch.index
+					joy_origin = touch.position
+					joy_current = touch.position
+				elif joy_index == -1 or touch.index != joy_index:
+					jump_index = touch.index
 					Input.action_press("jump")
+				queue_redraw()
 			else:
-				var role: String = touch_roles.get(touch.index, "")
-				if role == "left": Input.action_release("move_left")
-				elif role == "right": Input.action_release("move_right")
-				elif role == "boost": Input.action_release("rescue")
-				elif role == "jump": Input.action_release("jump")
-				touch_roles.erase(touch.index)
-				drag_offsets.erase(touch.index)
+				if touch.index == joy_index:
+					Input.action_release("move_left")
+					Input.action_release("move_right")
+					joy_index = -1
+				elif touch.index == jump_index:
+					Input.action_release("jump")
+					jump_index = -1
+				elif touch.index == boost_index:
+					Input.action_release("rescue")
+					boost_index = -1
+				queue_redraw()
 		elif event is InputEventScreenDrag:
 			var drag := event as InputEventScreenDrag
-			if touch_roles.get(drag.index, "") == "drag":
-				pad_origin = drag.position - drag_offsets.get(drag.index, Vector2(120, 0))
-				pad_origin.x = clampf(pad_origin.x, 12.0, screen_size.x - 272.0)
-				pad_origin.y = clampf(pad_origin.y, 70.0, screen_size.y - 118.0)
+			if drag.index == joy_index:
+				joy_current = drag.position
+				_update_move_axis()
 				queue_redraw()
 
 class Backdrop extends Node2D:
@@ -308,6 +344,7 @@ func _setup_input() -> void:
 	_add_keys("rescue", [KEY_Q, KEY_SHIFT])
 	_add_keys("restart", [KEY_R])
 	_add_keys("buy_boost", [KEY_B])
+	_add_keys("toggle_mute", [KEY_M])
 
 func _add_keys(action: StringName, keys: Array) -> void:
 	if not InputMap.has_action(action):
@@ -355,12 +392,19 @@ func _build_world() -> void:
 			var platform_style: int = (row + level * 2) % 6
 			if tiny_stairs:
 				platform_style = 2 if row % 2 == 0 else 4
-			var moving_interval: int = maxi(7, 20 - level * 2)
-			var is_moving := row >= 50 and row < 95 and row % moving_interval == 0 and not mandatory_double
-			_add_platform(Vector2(x, y), Vector2(width, 52), false, platform_style, is_moving, level, row)
-			var obstacle_spacing: int = maxi(3, 7 - level)
+			var moving_interval: int = maxi(4, 14 - level * 2)
+			var is_moving := row >= 35 and row < 98 and row % moving_interval == 0 and not mandatory_double and not tiny_stairs
+			var motion_type: int = (row / moving_interval + level) % 3
+			_add_platform(Vector2(x, y), Vector2(width, 52), false, platform_style, is_moving, level, row, motion_type)
+			var obstacle_spacing: int = maxi(2, 6 - level)
 			if not tiny_stairs and not narrow_crossing and not mandatory_double and (row % obstacle_spacing == 1 or row % 5 == 2):
-				_add_obstacle(Vector2(x + (-70.0 if row % 2 == 0 else 70.0), y - 72.0), (row + level) % 5)
+				var obstacle_style: int = (row * 3 + level * 5) % 8
+				_add_obstacle(Vector2(x + (-70.0 if row % 2 == 0 else 70.0), y - 72.0), obstacle_style, rng.randf_range(0.8, 1.55))
+				# From Level 3 onward, some rows get a second, differently-sized obstacle
+				# on the opposite side of the platform so routes read as less uniform.
+				if level >= 2 and row % 4 == 3:
+					var second_style: int = (row * 7 + level * 2) % 8
+					_add_obstacle(Vector2(x + (70.0 if row % 2 == 0 else -70.0), y - 72.0), second_style, rng.randf_range(0.65, 1.1))
 			if row % 5 == 0:
 				_add_coin(Vector2(x, y - 72))
 		if level < LEVELS - 1:
@@ -372,13 +416,15 @@ func _build_world() -> void:
 	# A broad finish garden above the sixth biome.
 	_add_platform(Vector2(3500, WORLD_BOTTOM - LEVELS * LEVEL_HEIGHT), Vector2(2200, 76), true)
 
-func _add_platform(pos: Vector2, size: Vector2, safe: bool, style: int = 0, moving: bool = false, stage: int = 0, row: int = 0) -> void:
+func _add_platform(pos: Vector2, size: Vector2, safe: bool, style: int = 0, moving: bool = false, stage: int = 0, row: int = 0, motion_type: int = 0) -> void:
 	var body: Node2D
 	if moving:
 		var mover := MovingPlatform.new()
 		mover.base_position = pos
-		mover.move_amplitude = 35.0 + float(stage) * 20.0
-		mover.move_speed = 0.72 + float(stage) * 0.11
+		mover.motion_type = motion_type
+		mover.move_amplitude = 35.0 + float(stage) * 22.0
+		mover.move_amplitude_y = 28.0 + float(stage) * 16.0
+		mover.move_speed = 0.72 + float(stage) * 0.12
 		mover.move_phase = float(row) * 0.71
 		body = mover
 	else:
@@ -397,7 +443,8 @@ func _add_platform(pos: Vector2, size: Vector2, safe: bool, style: int = 0, movi
 	var palettes := [Color("76502a"), Color("4f7c39"), Color("a9583b"), Color("75553a"), Color("65737a"), Color("8c6a2e")]
 	var body_color: Color
 	if moving:
-		body_color = Color("2f9eaa")
+		var mover_colors := [Color("2f9eaa"), Color("aa6ee0"), Color("e0a12f")]
+		body_color = mover_colors[motion_type]
 	elif safe:
 		body_color = Color("6f8c3d")
 	else:
@@ -422,7 +469,8 @@ func _add_platform(pos: Vector2, size: Vector2, safe: bool, style: int = 0, movi
 	moss.width = 7
 	var tops := [Color("b48c45"),Color("a7cf62"),Color("e99a68"),Color("b78a5e"),Color("a8bbc0"),Color("d3ad4f")]
 	if moving:
-		moss.default_color = Color("73e4ff")
+		var mover_top_colors := [Color("73e4ff"), Color("dcb3ff"), Color("ffd98a")]
+		moss.default_color = mover_top_colors[motion_type]
 	elif safe:
 		moss.default_color = Color("b9dd61")
 	else:
@@ -442,12 +490,12 @@ func _add_platform(pos: Vector2, size: Vector2, safe: bool, style: int = 0, movi
 		body.add_child(detail)
 	add_child(body)
 
-func _add_obstacle(pos: Vector2, style: int) -> void:
+func _add_obstacle(pos: Vector2, style: int, scale_factor: float = 1.0) -> void:
 	var body := StaticBody2D.new()
 	body.position = pos
-	var sizes := [Vector2(82,96),Vector2(110,82),Vector2(72,126),Vector2(120,76),Vector2(88,104)]
-	var colors := [Color("77848b"),Color("9a6938"),Color("d46b46"),Color("725137"),Color("8c9f45")]
-	var size: Vector2 = sizes[style]
+	var sizes := [Vector2(82,96),Vector2(110,82),Vector2(72,126),Vector2(120,76),Vector2(88,104),Vector2(46,150),Vector2(168,64),Vector2(132,110)]
+	var colors := [Color("77848b"),Color("9a6938"),Color("d46b46"),Color("725137"),Color("8c9f45"),Color("9c5f5f"),Color("6d7a52"),Color("857a6a")]
+	var size: Vector2 = sizes[style] * scale_factor
 	var collider := CollisionShape2D.new()
 	var shape := RectangleShape2D.new()
 	shape.size = size
@@ -503,7 +551,7 @@ func _add_obstacle(pos: Vector2, style: int) -> void:
 		log_shape.begin_cap_mode = Line2D.LINE_CAP_ROUND
 		log_shape.end_cap_mode = Line2D.LINE_CAP_ROUND
 		body.add_child(log_shape)
-	else: # Sprout
+	elif style == 4: # Sprout
 		var sprout := Line2D.new()
 		sprout.points = PackedVector2Array([Vector2(0,h.y*.72),Vector2(0,-h.y*.55)])
 		sprout.width = 13
@@ -519,6 +567,47 @@ func _add_obstacle(pos: Vector2, style: int) -> void:
 			leaf.begin_cap_mode = Line2D.LINE_CAP_ROUND
 			leaf.end_cap_mode = Line2D.LINE_CAP_ROUND
 			body.add_child(leaf)
+	elif style == 5: # Thin root spike - tall and narrow, tests precise footing
+		var spike := Line2D.new()
+		spike.points = PackedVector2Array([Vector2(0,h.y*.75),Vector2(0,-h.y*.7)])
+		spike.width = size.x * 0.5
+		spike.default_color = colors[style]
+		spike.begin_cap_mode = Line2D.LINE_CAP_ROUND
+		spike.end_cap_mode = Line2D.LINE_CAP_ROUND
+		body.add_child(spike)
+		var spike_tip := Line2D.new()
+		spike_tip.points = PackedVector2Array([Vector2(0,-h.y*.55),Vector2(0,-h.y*.92)])
+		spike_tip.width = size.x * 0.22
+		spike_tip.default_color = colors[style].lightened(0.2)
+		spike_tip.begin_cap_mode = Line2D.LINE_CAP_ROUND
+		spike_tip.end_cap_mode = Line2D.LINE_CAP_ROUND
+		body.add_child(spike_tip)
+	elif style == 6: # Wide low barrier - forces a jump rather than a dodge
+		var bar := Line2D.new()
+		bar.points = PackedVector2Array([Vector2(-h.x*.62,4),Vector2(h.x*.62,-2)])
+		bar.width = size.y * 0.7
+		bar.default_color = colors[style]
+		bar.begin_cap_mode = Line2D.LINE_CAP_ROUND
+		bar.end_cap_mode = Line2D.LINE_CAP_ROUND
+		body.add_child(bar)
+		var bar_top := Line2D.new()
+		bar_top.points = PackedVector2Array([Vector2(-h.x*.55,-h.y*.32),Vector2(h.x*.55,-h.y*.36)])
+		bar_top.width = 8
+		bar_top.default_color = colors[style].lightened(0.25)
+		bar_top.begin_cap_mode = Line2D.LINE_CAP_ROUND
+		bar_top.end_cap_mode = Line2D.LINE_CAP_ROUND
+		body.add_child(bar_top)
+	else: # Boulder cluster - three uneven stones grouped together
+		var offsets := [Vector2(-h.x*.5,h.y*.28),Vector2(h.x*.32,h.y*.42),Vector2(h.x*.02,-h.y*.35)]
+		var radii := [h.x*.42,h.x*.34,h.x*.5]
+		for i in 3:
+			var stone := Line2D.new()
+			stone.points = PackedVector2Array([offsets[i] - Vector2(radii[i]*.6,0), offsets[i] + Vector2(radii[i]*.6,0)])
+			stone.width = radii[i] * 1.5
+			stone.default_color = colors[style].darkened(float(i) * 0.08)
+			stone.begin_cap_mode = Line2D.LINE_CAP_ROUND
+			stone.end_cap_mode = Line2D.LINE_CAP_ROUND
+			body.add_child(stone)
 	add_child(body)
 
 func _add_checkpoint(pos: Vector2, level: int) -> void:
@@ -603,7 +692,7 @@ func _build_ui() -> void:
 	coin_label.size = Vector2(330,60)
 	coin_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	layer.add_child(coin_label)
-	hint_label = _label(Vector2(50,995), 24, Color(1,1,1,0.82), "A/D or arrows: move     SPACE: high jump     Q or SHIFT: rescue boost     R: checkpoint")
+	hint_label = _label(Vector2(50,995), 24, Color(1,1,1,0.82), "A/D or arrows: move     SPACE: high jump     Q or SHIFT: rescue boost     R: checkpoint     M: mute")
 	layer.add_child(hint_label)
 	status_label = _label(Vector2(690,52), 30, Color("ffe578"), status_text)
 	status_label.size = Vector2(600,55)
@@ -633,6 +722,13 @@ func _build_ui() -> void:
 	wings.size = Vector2(110,100)
 	wings.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rescue_button.add_child(wings)
+	mute_button = Button.new()
+	mute_button.position = Vector2(1540, 108)
+	mute_button.size = Vector2(220, 56)
+	mute_button.text = "🔊 MUSIC"
+	mute_button.add_theme_font_size_override("font_size", 22)
+	mute_button.pressed.connect(_toggle_mute)
+	layer.add_child(mute_button)
 	_build_character_menu(layer)
 	_build_stage_overlay(layer)
 	_build_win_overlay(layer)
@@ -754,6 +850,10 @@ func _label(pos: Vector2, size: int, color: Color, text: String) -> Label:
 	l.add_theme_constant_override("shadow_offset_y", 3)
 	return l
 
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("toggle_mute"):
+		_toggle_mute()
+
 func _physics_process(delta: float) -> void:
 	if not game_started or won:
 		return
@@ -847,9 +947,14 @@ func _show_win() -> void:
 
 func _start_music() -> void:
 	# Full-length original instrumental asset with multiple sections.
-	var music := AudioStreamPlayer.new()
-	music.stream = load("res://audio/terracast_garden_groove.wav")
-	music.volume_db = -10.0
-	add_child(music)
-	music.finished.connect(func(): music.play())
-	music.play()
+	music_player = AudioStreamPlayer.new()
+	music_player.stream = load("res://audio/terracast_garden_groove.wav")
+	music_player.volume_db = -10.0
+	add_child(music_player)
+	music_player.finished.connect(func(): music_player.play())
+	music_player.play()
+
+func _toggle_mute() -> void:
+	muted = not muted
+	music_player.volume_db = -80.0 if muted else -10.0
+	mute_button.text = "🔇 MUTED" if muted else "🔊 MUSIC"
