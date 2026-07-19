@@ -24,6 +24,7 @@ var height_label: Label
 var coin_label: Label
 var hint_label: Label
 var rescue_button: Control
+var mobile_controls: MobileControls
 var character_menu: ColorRect
 var win_overlay: ColorRect
 var stage_overlay: ColorRect
@@ -158,6 +159,96 @@ class CoinVisual extends Node2D:
 		draw_circle(Vector2(9, -7), 3.2, Color("7b4a08"))
 		# Metallic shine.
 		draw_arc(Vector2(-5, -5), 21, 3.5, 5.1, 18, Color(1, 1, 0.82, 0.85), 4.0)
+
+class MobileControls extends Node2D:
+	var active := false:
+		set(value):
+			active = value
+			queue_redraw()
+	var pad_origin := Vector2.ZERO
+	var boost_rect := Rect2()
+	var touch_roles := {}
+	var drag_offsets := {}
+	var screen_size := Vector2.ZERO
+
+	func _ready() -> void:
+		z_index = 200
+		set_process_input(true)
+		_layout(true)
+		get_viewport().size_changed.connect(func() -> void: _layout(true))
+
+	func _layout(reset_pad: bool) -> void:
+		screen_size = get_viewport().get_visible_rect().size
+		if reset_pad or pad_origin == Vector2.ZERO:
+			pad_origin = Vector2(26, screen_size.y - 132)
+		boost_rect = Rect2(Vector2(screen_size.x - 172, screen_size.y - 132), Vector2(146, 106))
+		queue_redraw()
+
+	func _left_rect() -> Rect2:
+		return Rect2(pad_origin, Vector2(118, 106))
+
+	func _right_rect() -> Rect2:
+		return Rect2(pad_origin + Vector2(130, 0), Vector2(118, 106))
+
+	func _grip_rect() -> Rect2:
+		return Rect2(pad_origin + Vector2(55, -52), Vector2(138, 44))
+
+	func _draw() -> void:
+		if not active:
+			return
+		var font := ThemeDB.fallback_font
+		var left := _left_rect()
+		var right := _right_rect()
+		var grip := _grip_rect()
+		draw_rect(left, Color(0.05, 0.16, 0.08, 0.78), true)
+		draw_rect(right, Color(0.05, 0.16, 0.08, 0.78), true)
+		draw_rect(left, Color(0.72, 1.0, 0.45, 0.9), false, 4.0)
+		draw_rect(right, Color(0.72, 1.0, 0.45, 0.9), false, 4.0)
+		draw_rect(grip, Color(0.16, 0.22, 0.12, 0.88), true)
+		draw_rect(boost_rect, Color(0.24, 0.58, 0.10, 0.82), true)
+		draw_rect(boost_rect, Color(0.82, 1.0, 0.58, 0.95), false, 4.0)
+		draw_string(font, left.position + Vector2(43, 70), "L", HORIZONTAL_ALIGNMENT_LEFT, -1, 38, Color.WHITE)
+		draw_string(font, right.position + Vector2(43, 70), "R", HORIZONTAL_ALIGNMENT_LEFT, -1, 38, Color.WHITE)
+		draw_string(font, grip.position + Vector2(19, 31), "MOVE", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
+		draw_string(font, boost_rect.position + Vector2(15, 66), "BOOST", HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color.WHITE)
+		draw_string(font, Vector2(screen_size.x * 0.5 - 125, screen_size.y - 34), "TAP ANYWHERE TO JUMP", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 1, 1, 0.72))
+
+	func _input(event: InputEvent) -> void:
+		if not active:
+			return
+		if event is InputEventScreenTouch:
+			var touch := event as InputEventScreenTouch
+			if touch.pressed:
+				if _grip_rect().has_point(touch.position):
+					touch_roles[touch.index] = "drag"
+					drag_offsets[touch.index] = touch.position - pad_origin
+				elif _left_rect().has_point(touch.position):
+					touch_roles[touch.index] = "left"
+					Input.action_press("move_left")
+				elif _right_rect().has_point(touch.position):
+					touch_roles[touch.index] = "right"
+					Input.action_press("move_right")
+				elif boost_rect.has_point(touch.position):
+					touch_roles[touch.index] = "boost"
+					Input.action_press("rescue")
+				else:
+					touch_roles[touch.index] = "jump"
+					Input.action_press("jump")
+			else:
+				var role: String = touch_roles.get(touch.index, "")
+				if role == "left": Input.action_release("move_left")
+				elif role == "right": Input.action_release("move_right")
+				elif role == "boost": Input.action_release("rescue")
+				elif role == "jump": Input.action_release("jump")
+				touch_roles.erase(touch.index)
+				drag_offsets.erase(touch.index)
+		elif event is InputEventScreenDrag:
+			var drag := event as InputEventScreenDrag
+			if touch_roles.get(drag.index, "") == "drag":
+				pad_origin = drag.position - drag_offsets.get(drag.index, Vector2(120, 0))
+				pad_origin.x = clampf(pad_origin.x, 12.0, screen_size.x - 272.0)
+				pad_origin.y = clampf(pad_origin.y, 70.0, screen_size.y - 118.0)
+				queue_redraw()
 
 class Backdrop extends Node2D:
 	func _draw() -> void:
@@ -547,53 +638,9 @@ func _build_ui() -> void:
 	_build_win_overlay(layer)
 	_build_touch_controls(layer)
 
-func _touch_button(layer: CanvasLayer, label_text: String, button_size: Vector2) -> Button:
-	var button := Button.new()
-	button.text = label_text
-	button.size = button_size
-	button.modulate = Color(1, 1, 1, 0.68)
-	button.focus_mode = Control.FOCUS_NONE
-	button.z_index = 100
-	button.add_theme_font_size_override("font_size", 28)
-	layer.add_child(button)
-	return button
-
-func _bind_hold_button(button: Button, action: StringName) -> void:
-	button.button_down.connect(func() -> void: Input.action_press(action))
-	button.button_up.connect(func() -> void: Input.action_release(action))
-	button.tree_exiting.connect(func() -> void: Input.action_release(action))
-
 func _build_touch_controls(layer: CanvasLayer) -> void:
-	# Large thumb targets stay at the screen edges while leaving the center clear.
-	var left := _touch_button(layer, "◀", Vector2(116, 104))
-	var right := _touch_button(layer, "▶", Vector2(116, 104))
-	var jump_button := _touch_button(layer, "JUMP", Vector2(138, 112))
-	var boost_button := _touch_button(layer, "BOOST", Vector2(130, 96))
-
-	var layout_controls := func() -> void:
-		var viewport_size := get_viewport().get_visible_rect().size
-		var portrait := viewport_size.y > viewport_size.x
-		var bottom_y := viewport_size.y - 128.0
-		left.position = Vector2(24, bottom_y)
-		right.position = Vector2(154, bottom_y)
-		jump_button.position = Vector2(viewport_size.x - 162.0, viewport_size.y - 136.0)
-		if portrait:
-			# Stack BOOST well above JUMP when horizontal room is limited.
-			boost_button.position = Vector2(viewport_size.x - 158.0, viewport_size.y - 252.0)
-		else:
-			# In landscape, keep BOOST beside JUMP with a generous thumb gap.
-			boost_button.position = Vector2(viewport_size.x - 322.0, viewport_size.y - 128.0)
-
-	layout_controls.call()
-	get_viewport().size_changed.connect(layout_controls)
-	_bind_hold_button(left, "move_left")
-	_bind_hold_button(right, "move_right")
-	_bind_hold_button(jump_button, "jump")
-	boost_button.pressed.connect(func() -> void:
-		Input.action_press("rescue")
-		await get_tree().process_frame
-		Input.action_release("rescue")
-	)
+	mobile_controls = MobileControls.new()
+	layer.add_child(mobile_controls)
 
 func _build_character_menu(layer: CanvasLayer) -> void:
 	player.set_physics_process(false)
@@ -630,6 +677,7 @@ func _select_character(character_name: String, color: Color, variant: int) -> vo
 	player.queue_redraw()
 	character_menu.hide()
 	game_started = true
+	mobile_controls.active = true
 	player.set_physics_process(true)
 	status_label.text = "%s BEGINS THE 16,000 m CLIMB!" % character_name
 	status_timer = 4.0
