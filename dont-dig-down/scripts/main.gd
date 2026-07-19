@@ -477,7 +477,7 @@ func _collect_coin(body: Node2D, coin: Area2D) -> void:
 	if body != player or not is_instance_valid(coin):
 		return
 	coins += 1
-	coin_label.text = "● %d COINS" % coins
+	coin_label.text = "COINS: %d" % coins
 	status_label.text = "COIN COLLECTED · %d / %d FOR AN EXTRA BOOST" % [coins, BOOST_COST]
 	status_timer = 1.4
 	coin.queue_free()
@@ -508,7 +508,7 @@ func _build_ui() -> void:
 	layer.add_child(level_label)
 	height_label = _label(Vector2(54,94), 25, Color("a8dc70"), "HEIGHT 0 m")
 	layer.add_child(height_label)
-	coin_label = _label(Vector2(1540,40), 30, Color("ffd34e"), "● 0 COINS")
+	coin_label = _label(Vector2(1540,40), 30, Color("ffd34e"), "COINS: 0")
 	coin_label.size = Vector2(330,60)
 	coin_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	layer.add_child(coin_label)
@@ -547,13 +547,13 @@ func _build_ui() -> void:
 	_build_win_overlay(layer)
 	_build_touch_controls(layer)
 
-func _touch_button(layer: CanvasLayer, label_text: String, anchor_preset: int, button_size: Vector2) -> Button:
+func _touch_button(layer: CanvasLayer, label_text: String, button_size: Vector2) -> Button:
 	var button := Button.new()
 	button.text = label_text
-	button.set_anchors_preset(anchor_preset)
 	button.size = button_size
 	button.modulate = Color(1, 1, 1, 0.68)
 	button.focus_mode = Control.FOCUS_NONE
+	button.z_index = 100
 	button.add_theme_font_size_override("font_size", 28)
 	layer.add_child(button)
 	return button
@@ -565,23 +565,24 @@ func _bind_hold_button(button: Button, action: StringName) -> void:
 
 func _build_touch_controls(layer: CanvasLayer) -> void:
 	# Large thumb targets stay at the screen edges while leaving the center clear.
-	var left := _touch_button(layer, "◀", Control.PRESET_BOTTOM_LEFT, Vector2(116, 104))
-	var right := _touch_button(layer, "▶", Control.PRESET_BOTTOM_LEFT, Vector2(116, 104))
-	var jump_button := _touch_button(layer, "JUMP", Control.PRESET_BOTTOM_RIGHT, Vector2(138, 112))
-	var boost_button := _touch_button(layer, "BOOST", Control.PRESET_BOTTOM_RIGHT, Vector2(130, 96))
+	var left := _touch_button(layer, "◀", Vector2(116, 104))
+	var right := _touch_button(layer, "▶", Vector2(116, 104))
+	var jump_button := _touch_button(layer, "JUMP", Vector2(138, 112))
+	var boost_button := _touch_button(layer, "BOOST", Vector2(130, 96))
 
 	var layout_controls := func() -> void:
 		var viewport_size := get_viewport().get_visible_rect().size
 		var portrait := viewport_size.y > viewport_size.x
-		left.position = Vector2(24, -132)
-		right.position = Vector2(154, -132)
-		jump_button.position = Vector2(-162, -140)
+		var bottom_y := viewport_size.y - 128.0
+		left.position = Vector2(24, bottom_y)
+		right.position = Vector2(154, bottom_y)
+		jump_button.position = Vector2(viewport_size.x - 162.0, viewport_size.y - 136.0)
 		if portrait:
 			# Stack BOOST well above JUMP when horizontal room is limited.
-			boost_button.position = Vector2(-158, -264)
+			boost_button.position = Vector2(viewport_size.x - 158.0, viewport_size.y - 252.0)
 		else:
 			# In landscape, keep BOOST beside JUMP with a generous thumb gap.
-			boost_button.position = Vector2(-322, -132)
+			boost_button.position = Vector2(viewport_size.x - 322.0, viewport_size.y - 128.0)
 
 	layout_controls.call()
 	get_viewport().size_changed.connect(layout_controls)
@@ -713,7 +714,7 @@ func _physics_process(delta: float) -> void:
 	if Input.is_action_just_pressed("buy_boost") and not rescue_ready and coins >= BOOST_COST:
 		coins -= BOOST_COST
 		rescue_ready = true
-		coin_label.text = "● %d COINS" % coins
+		coin_label.text = "COINS: %d" % coins
 		ability_label.text = "RESCUE BOOST · READY"
 		ability_label.add_theme_color_override("font_color", Color("eaffb5"))
 		status_label.text = "EXTRA RESCUE BOOST PURCHASED!"

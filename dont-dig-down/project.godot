@@ -1,5 +1,5 @@
 [application]
-config/name="TerraCast: Don't Dig Down V1.3 Responsive Mobile"
+config/name="TerraCast: Don't Dig Down V1.4 Touch Fix"
 run/main_scene="res://main.tscn"
 
 [display]
